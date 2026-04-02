@@ -246,13 +246,21 @@ class ResponsePanel(QDialog):
         self.status_lbl.setText("")
         self.copy_btn.setEnabled(True)
         self.regen_btn.setEnabled(True)
+        self._position_near_overlay()
+        self.show()
+        self.raise_()
+        self.activateWindow()
 
     def show_error(self, message: str):
         """Call this when an error occurs during context capture or AI call."""
-        self.suggestion_box.setPlainText("")
-        self.status_lbl.setText(f"⚠️  {message}")
+        self.suggestion_box.setPlainText(message)
+        self.status_lbl.setText("⚠️  See details above")
         self.copy_btn.setEnabled(False)
         self.regen_btn.setEnabled(True)
+        self._position_near_overlay()
+        self.show()
+        self.raise_()
+        self.activateWindow()
 
     def set_context(self, text: str):
         self.context_box.setPlainText(text)

@@ -5,12 +5,13 @@ The main application controller.
 Wires together the overlay, response panel, tray icon, settings,
 context manager, and AI engine.
 
-Phase 2: Real UIAutomation context extraction is wired in.
-         Overlay is hidden before capture so the target app regains focus.
+Phase 2: Real UIAutomation context extraction with full debug logging.
          AI call is still stubbed — will be replaced in Phase 3.
 """
 
 import time
+import logging
+import traceback
 
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import QObject, QThread, pyqtSignal, QTimer
@@ -23,6 +24,14 @@ from modules.tray_icon import TrayIcon
 from modules.context_manager import ContextManager
 from modules.text_extractor import ExtractedContext
 
+# Set up logging to console so we can see what's happening
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="[%(asctime)s] %(levelname)s %(name)s: %(message)s",
+    datefmt="%H:%M:%S"
+)
+log = logging.getLogger("AppController")
+
 
 # ------------------------------------------------------------------ #
 #  Context + AI Worker                                                 #
@@ -32,9 +41,6 @@ class _ContextWorker(QThread):
     """
     Runs context extraction and AI suggestion generation in a background
     thread so the UI stays responsive.
-
-    The overlay is hidden by the controller BEFORE this thread starts,
-    giving the target app time to regain foreground focus.
     """
     result_ready = pyqtSignal(str, str)   # (context_text, suggestion_text)
     error_occurred = pyqtSignal(str)
@@ -45,41 +51,57 @@ class _ContextWorker(QThread):
         self.settings = settings
 
     def run(self):
+        log.debug(f"Worker started for mode={self.mode}")
         try:
             # Brief pause to ensure the target app has regained focus
-            # after the overlay was hidden (300ms is enough for Win32 focus switch)
-            time.sleep(0.35)
+            time.sleep(0.4)
 
-            # ---- Step 1: Extract context ---- #
-            ctx_manager = ContextManager()
-            extracted: ExtractedContext = ctx_manager.capture_sync(self.mode)
+            # ---- Step 1: Detect foreground app ---- #
+            from modules.app_detector import detect_foreground_app
+            app_ctx = detect_foreground_app()
+            log.debug(f"Detected app: {app_ctx}")
+
+            # ---- Step 2: Extract context ---- #
+            from modules.text_extractor import extract_context
+            extracted = extract_context(app_ctx)
+            log.debug(
+                f"Extraction method={extracted.extraction_method} "
+                f"has_content={extracted.has_content()} "
+                f"error={extracted.error!r} "
+                f"body_len={len(extracted.body)} "
+                f"raw_len={len(extracted.raw_text)}"
+            )
+
+            if extracted.error:
+                log.warning(f"Extraction error: {extracted.error}")
 
             if not extracted.has_content():
-                error_msg = extracted.error or (
-                    f"Could not read content from "
-                    f"{'Teams' if self.mode == 'teams' else 'Outlook'}.\n"
-                    "Make sure the application window is open and visible "
-                    "and not minimised."
+                # Show what we know even if content is empty
+                debug_info = (
+                    f"Window detected: {app_ctx.window_title!r}\n"
+                    f"Process: {app_ctx.process_name!r}\n"
+                    f"App type: {app_ctx.app_type}\n"
+                    f"Extraction method: {extracted.extraction_method}\n"
+                    f"Error: {extracted.error or 'none'}\n\n"
+                    "UIAutomation returned no text. "
+                    "Make sure Outlook/Teams is open and an email/chat is selected."
                 )
-                self.error_occurred.emit(error_msg)
+                self.error_occurred.emit(debug_info)
                 return
 
             context_text = extracted.to_prompt_context()
+            log.debug(f"Context text (first 200 chars): {context_text[:200]!r}")
 
-            # ---- Step 2: Generate AI suggestion (Phase 3 stub) ---- #
-            # TODO: Replace with real Azure OpenAI call in Phase 3
+            # ---- Step 3: Generate AI suggestion (Phase 3 stub) ---- #
             suggestion = self._stub_ai_suggestion(context_text, self.mode)
-
             self.result_ready.emit(context_text, suggestion)
 
         except Exception as e:
-            self.error_occurred.emit(f"Unexpected error: {str(e)}")
+            tb = traceback.format_exc()
+            log.error(f"Worker exception:\n{tb}")
+            self.error_occurred.emit(f"Error during extraction:\n{str(e)}\n\n{tb}")
 
     def _stub_ai_suggestion(self, context: str, mode: str) -> str:
-        """
-        Phase 3 stub — returns a placeholder suggestion.
-        Will be replaced by a real Azure OpenAI call in Phase 3.
-        """
         if mode == "teams":
             return (
                 "[AI suggestion will appear here in Phase 3]\n\n"
@@ -99,24 +121,19 @@ class _ContextWorker(QThread):
 # ------------------------------------------------------------------ #
 
 class AppController(QObject):
-    """
-    Orchestrates all UI components and business logic.
-    """
 
     def __init__(self):
         super().__init__()
+        log.debug("AppController initialising")
 
         self.settings = SettingsManager()
 
-        # ---- Overlay ---- #
         self.overlay = OverlayWindow()
         self.overlay.teams_clicked.connect(lambda: self._on_icon_clicked("teams"))
         self.overlay.outlook_clicked.connect(lambda: self._on_icon_clicked("outlook"))
 
-        # ---- Response panels (one per mode, lazily created) ---- #
         self._panels: dict[str, ResponsePanel] = {}
 
-        # ---- Tray icon ---- #
         self.tray = TrayIcon()
         self.tray.show_overlay_requested.connect(self.overlay.show)
         self.tray.hide_overlay_requested.connect(self.overlay.hide)
@@ -124,41 +141,25 @@ class AppController(QObject):
         self.tray.quit_requested.connect(QApplication.instance().quit)
         self.tray.show()
 
-        # ---- Active worker ---- #
         self._worker: QThread | None = None
-        self._pending_mode: str = ""
-
-        # ---- Show overlay ---- #
         self.overlay.show()
-
-    # ------------------------------------------------------------------ #
-    #  Icon click handler                                                   #
-    # ------------------------------------------------------------------ #
+        log.debug("AppController ready")
 
     def _on_icon_clicked(self, mode: str):
-        """
-        Called when the user clicks the Teams or Outlook icon.
+        log.debug(f"Icon clicked: mode={mode}")
 
-        Flow:
-          1. Hide the overlay so the target app regains foreground focus
-          2. After a short delay, start the extraction worker
-          3. When the worker finishes, restore the overlay and show the panel
-        """
-        # Cancel any running worker
         if self._worker and self._worker.isRunning():
             self._worker.terminate()
             self._worker.wait()
 
-        self._pending_mode = mode
-
-        # Step 1: Hide the overlay so the target app becomes foreground
+        # Hide overlay so target app regains focus
         self.overlay.hide()
+        log.debug("Overlay hidden, scheduling capture in 400ms")
 
-        # Step 2: After 400ms (enough for Win32 focus switch), start worker
         QTimer.singleShot(400, lambda: self._start_capture(mode))
 
     def _start_capture(self, mode: str):
-        """Start the context extraction worker after the overlay has been hidden."""
+        log.debug(f"Starting capture worker for mode={mode}")
         self._worker = _ContextWorker(mode, self.settings)
         self._worker.result_ready.connect(
             lambda ctx, sug: self._on_result(mode, ctx, sug)
@@ -169,25 +170,17 @@ class AppController(QObject):
         self._worker.start()
 
     def _on_result(self, mode: str, context: str, suggestion: str):
-        """Called when extraction + suggestion generation succeeds."""
-        # Restore the overlay first
+        log.debug(f"Result received for mode={mode}, showing panel")
         self.overlay.show()
-
         panel = self._get_panel(mode)
         panel.set_context(context)
         panel.show_result(suggestion)
 
     def _on_error(self, mode: str, message: str):
-        """Called when extraction fails."""
-        # Restore the overlay even on error
+        log.warning(f"Error for mode={mode}: {message[:100]}")
         self.overlay.show()
-
         panel = self._get_panel(mode)
         panel.show_error(message)
-
-    # ------------------------------------------------------------------ #
-    #  Panel management                                                     #
-    # ------------------------------------------------------------------ #
 
     def _get_panel(self, mode: str) -> ResponsePanel:
         if mode not in self._panels:
@@ -195,10 +188,6 @@ class AppController(QObject):
             panel.regenerate_requested.connect(lambda: self._on_icon_clicked(mode))
             self._panels[mode] = panel
         return self._panels[mode]
-
-    # ------------------------------------------------------------------ #
-    #  Settings                                                             #
-    # ------------------------------------------------------------------ #
 
     def _open_settings(self):
         dlg = SettingsDialog(self.settings, parent=self.overlay)
