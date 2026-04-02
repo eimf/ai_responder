@@ -2,10 +2,11 @@
 app_controller.py
 -----------------
 The main application controller.
-Wires together the overlay, response panel, tray icon, and settings.
+Wires together the overlay, response panel, tray icon, settings,
+context manager, and AI engine.
 
-In Phase 1, the AI call and context extraction are stubbed out with
-placeholder text so the full UI can be tested independently.
+Phase 2: Real UIAutomation context extraction is wired in.
+         AI call is still stubbed — will be replaced in Phase 3.
 """
 
 from PyQt6.QtWidgets import QApplication
@@ -16,53 +17,72 @@ from modules.response_panel import ResponsePanel
 from modules.settings_manager import SettingsManager
 from modules.settings_dialog import SettingsDialog
 from modules.tray_icon import TrayIcon
+from modules.context_manager import ContextManager
+from modules.text_extractor import ExtractedContext
 
 
 # ------------------------------------------------------------------ #
-#  Stub worker — Phase 1 placeholder for AI + context extraction      #
-#  (will be replaced in Phase 2 & 3)                                  #
+#  Context + AI Worker                                                 #
 # ------------------------------------------------------------------ #
 
-class _StubWorker(QThread):
+class _ContextWorker(QThread):
     """
-    Simulates an async AI call.
-    In Phase 2 this will be replaced by real UIAutomation + AI logic.
+    Runs context extraction and AI suggestion generation in a background
+    thread so the UI stays responsive.
+
+    Phase 2: Real context extraction via UIAutomation / OCR.
+    Phase 3: Real AI call via Azure OpenAI (stub used for now).
     """
     result_ready = pyqtSignal(str, str)   # (context_text, suggestion_text)
     error_occurred = pyqtSignal(str)
 
-    def __init__(self, mode: str):
+    def __init__(self, mode: str, settings):
         super().__init__()
         self.mode = mode
+        self.settings = settings
 
     def run(self):
-        import time
-        time.sleep(1.5)   # simulate network latency
+        try:
+            # ---- Step 1: Extract context ---- #
+            ctx_manager = ContextManager()
+            extracted: ExtractedContext = ctx_manager.capture_sync(self.mode)
 
-        if self.mode == "teams":
-            context = (
-                "Alice: Hey, are you joining the standup at 10?\n"
-                "Bob: I might be 5 minutes late, go ahead without me."
-            )
-            suggestion = (
-                "No worries, I'll catch up on the notes afterwards. "
-                "Feel free to start without me!"
+            if not extracted.has_content():
+                error_msg = extracted.error or (
+                    f"Could not read content from {'Teams' if self.mode == 'teams' else 'Outlook'}.\n"
+                    "Make sure the application window is open and visible."
+                )
+                self.error_occurred.emit(error_msg)
+                return
+
+            context_text = extracted.to_prompt_context()
+
+            # ---- Step 2: Generate AI suggestion (Phase 3 stub) ---- #
+            # TODO: Replace with real Azure OpenAI call in Phase 3
+            suggestion = self._stub_ai_suggestion(context_text, self.mode)
+
+            self.result_ready.emit(context_text, suggestion)
+
+        except Exception as e:
+            self.error_occurred.emit(f"Unexpected error: {str(e)}")
+
+    def _stub_ai_suggestion(self, context: str, mode: str) -> str:
+        """
+        Phase 3 stub — returns a placeholder suggestion.
+        Will be replaced by a real Azure OpenAI call in Phase 3.
+        """
+        if mode == "teams":
+            return (
+                "[AI suggestion will appear here in Phase 3]\n\n"
+                "Detected context preview:\n"
+                f"{context[:300]}{'...' if len(context) > 300 else ''}"
             )
         else:
-            context = (
-                "From: manager@company.com\n"
-                "Subject: Q2 Budget Review\n\n"
-                "Hi, could you please send over the updated budget figures "
-                "for Q2 before end of day?"
+            return (
+                "[AI email draft will appear here in Phase 3]\n\n"
+                "Detected context preview:\n"
+                f"{context[:300]}{'...' if len(context) > 300 else ''}"
             )
-            suggestion = (
-                "Hi,\n\n"
-                "Thank you for reaching out. I will compile the updated Q2 budget "
-                "figures and send them over to you before end of day today.\n\n"
-                "Best regards"
-            )
-
-        self.result_ready.emit(context, suggestion)
 
 
 # ------------------------------------------------------------------ #
@@ -107,22 +127,15 @@ class AppController(QObject):
 
     def _on_icon_clicked(self, mode: str):
         """Called when the user clicks the Teams or Outlook icon."""
-        # Ensure settings are configured before proceeding
-        if not self.settings.is_configured:
-            self._open_settings()
-            return
-
         panel = self._get_panel(mode)
-        panel.show_loading("Detecting context…")
+        panel.show_loading("Reading screen content…")
 
         # Cancel any running worker
         if self._worker and self._worker.isRunning():
             self._worker.terminate()
             self._worker.wait()
 
-        # In Phase 1: use stub worker
-        # In Phase 2+: replace with real context extractor + AI engine
-        self._worker = _StubWorker(mode)
+        self._worker = _ContextWorker(mode, self.settings)
         self._worker.result_ready.connect(
             lambda ctx, sug: self._on_result(mode, ctx, sug)
         )
