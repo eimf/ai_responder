@@ -1,12 +1,12 @@
 @echo off
 REM ============================================================
-REM  AI Responder — First-time setup script for Windows
+REM  AI Responder -- First-time setup script for Windows
 REM  Run this once to create a virtual environment and install
 REM  all required dependencies.
 REM ============================================================
 
 echo.
-echo  AI Responder — Setup
+echo  AI Responder -- Setup
 echo  =====================
 echo.
 
@@ -32,20 +32,15 @@ echo  [2/4] Activating virtual environment...
 call venv\Scripts\activate.bat
 
 echo  [3/4] Installing Python dependencies...
-pip install --upgrade pip
+python -m pip install --upgrade pip --quiet
 pip install -r requirements.txt
 
 echo  [4/4] Checking for Tesseract OCR (optional fallback)...
-tesseract --version >nul 2>&1
+where tesseract >nul 2>&1
 IF ERRORLEVEL 1 (
-    echo.
-    echo  [INFO] Tesseract OCR is not installed.
-    echo  Tesseract is used as a last-resort OCR fallback.
-    echo  UIAutomation will be used as the primary extraction method.
-    echo  To install Tesseract (optional):
-    echo    https://github.com/UB-Mannheim/tesseract/wiki
-    echo    Install to: C:\Program Files\Tesseract-OCR\
-    echo.
+    echo  [INFO] Tesseract OCR binary not found on PATH.
+    echo         It is optional - UIAutomation is the primary extraction method.
+    echo         To install: https://github.com/UB-Mannheim/tesseract/wiki
 ) ELSE (
     echo  [OK] Tesseract OCR found.
 )
