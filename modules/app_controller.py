@@ -23,6 +23,7 @@ from modules.settings_dialog import SettingsDialog
 from modules.tray_icon import TrayIcon
 from modules.context_manager import ContextManager
 from modules.text_extractor import ExtractedContext
+from modules.ai_engine import generate_suggestion
 
 # Set up logging to console so we can see what's happening
 logging.basicConfig(
@@ -30,6 +31,10 @@ logging.basicConfig(
     format="[%(asctime)s] %(levelname)s %(name)s: %(message)s",
     datefmt="%H:%M:%S"
 )
+# Suppress noisy comtypes pointer-release DEBUG spam
+logging.getLogger("comtypes").setLevel(logging.INFO)
+logging.getLogger("comtypes._post_coinit.unknwn").setLevel(logging.INFO)
+
 log = logging.getLogger("AppController")
 
 
@@ -54,12 +59,20 @@ class _ContextWorker(QThread):
         log.debug(f"Worker started for mode={self.mode}")
         try:
             # Brief pause to ensure the target app has regained focus
-            time.sleep(0.4)
+            # (the overlay already waited 400ms before starting this worker)
+            time.sleep(0.2)
 
             # ---- Step 1: Detect foreground app ---- #
             from modules.app_detector import detect_foreground_app
             app_ctx = detect_foreground_app()
             log.debug(f"Detected app: {app_ctx}")
+
+            # If we didn't detect the expected app, retry once after a short wait
+            if app_ctx.app_type == "unknown":
+                log.debug("App not detected, retrying after 500ms...")
+                time.sleep(0.5)
+                app_ctx = detect_foreground_app()
+                log.debug(f"Retry detected app: {app_ctx}")
 
             # ---- Step 2: Extract context ---- #
             from modules.text_extractor import extract_context
@@ -78,13 +91,15 @@ class _ContextWorker(QThread):
             if not extracted.has_content():
                 # Show what we know even if content is empty
                 debug_info = (
-                    f"Window detected: {app_ctx.window_title!r}\n"
+                    f"Window: {app_ctx.window_title!r}\n"
                     f"Process: {app_ctx.process_name!r}\n"
                     f"App type: {app_ctx.app_type}\n"
-                    f"Extraction method: {extracted.extraction_method}\n"
+                    f"Method tried: {extracted.extraction_method}\n"
                     f"Error: {extracted.error or 'none'}\n\n"
-                    "UIAutomation returned no text. "
-                    "Make sure Outlook/Teams is open and an email/chat is selected."
+                    "Tips:\n"
+                    "• Make sure an email/chat is open or selected\n"
+                    "• The window must not be minimized\n"
+                    "• Try clicking on the message body before using AI Responder"
                 )
                 self.error_occurred.emit(debug_info)
                 return
@@ -92,28 +107,14 @@ class _ContextWorker(QThread):
             context_text = extracted.to_prompt_context()
             log.debug(f"Context text (first 200 chars): {context_text[:200]!r}")
 
-            # ---- Step 3: Generate AI suggestion (Phase 3 stub) ---- #
-            suggestion = self._stub_ai_suggestion(context_text, self.mode)
+            # ---- Step 3: Generate AI suggestion ---- #
+            suggestion = generate_suggestion(context_text, self.mode, self.settings)
             self.result_ready.emit(context_text, suggestion)
 
         except Exception as e:
             tb = traceback.format_exc()
             log.error(f"Worker exception:\n{tb}")
             self.error_occurred.emit(f"Error during extraction:\n{str(e)}\n\n{tb}")
-
-    def _stub_ai_suggestion(self, context: str, mode: str) -> str:
-        if mode == "teams":
-            return (
-                "[AI suggestion will appear here in Phase 3]\n\n"
-                "--- Detected context preview ---\n"
-                f"{context[:400]}{'...' if len(context) > 400 else ''}"
-            )
-        else:
-            return (
-                "[AI email draft will appear here in Phase 3]\n\n"
-                "--- Detected context preview ---\n"
-                f"{context[:400]}{'...' if len(context) > 400 else ''}"
-            )
 
 
 # ------------------------------------------------------------------ #
@@ -131,6 +132,7 @@ class AppController(QObject):
         self.overlay = OverlayWindow()
         self.overlay.teams_clicked.connect(lambda: self._on_icon_clicked("teams"))
         self.overlay.outlook_clicked.connect(lambda: self._on_icon_clicked("outlook"))
+        self.overlay.jabber_clicked.connect(lambda: self._on_icon_clicked("jabber"))
 
         self._panels: dict[str, ResponsePanel] = {}
 

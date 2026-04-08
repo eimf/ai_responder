@@ -13,7 +13,7 @@ clicks a Teams or Outlook icon.
 import threading
 from typing import Callable, Optional
 
-from .app_detector import detect_foreground_app, APP_TEAMS, APP_OUTLOOK, APP_UNKNOWN
+from .app_detector import detect_foreground_app, APP_TEAMS, APP_OUTLOOK, APP_JABBER, APP_UNKNOWN
 from .text_extractor import extract_context, ExtractedContext
 
 

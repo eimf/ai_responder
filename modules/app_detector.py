@@ -1,9 +1,9 @@
 """
 app_detector.py
 ---------------
-Detects which application is currently in the foreground (Teams or Outlook)
-using the Win32 API. Returns an AppContext object with the app type and
-window handle for downstream text extraction.
+Detects which application is currently in the foreground (Teams, Outlook,
+or Cisco Jabber) using the Win32 API.  Returns an AppContext object with
+the app type and window handle for downstream text extraction.
 """
 
 import ctypes
@@ -12,9 +12,10 @@ import ctypes.wintypes
 # App type constants
 APP_TEAMS = "teams"
 APP_OUTLOOK = "outlook"
+APP_JABBER = "jabber"
 APP_UNKNOWN = "unknown"
 
-# Known process/window title signatures
+# Known process / window-title signatures
 TEAMS_SIGNATURES = [
     "microsoft teams",
     "teams",
@@ -25,21 +26,29 @@ OUTLOOK_SIGNATURES = [
     "outlook",
 ]
 
+JABBER_SIGNATURES = [
+    "cisco jabber",
+    "jabber",
+]
+
 
 class AppContext:
     """Holds information about the currently detected foreground application."""
 
     def __init__(self, app_type: str, hwnd: int, window_title: str, process_name: str):
-        self.app_type = app_type          # APP_TEAMS, APP_OUTLOOK, APP_UNKNOWN
-        self.hwnd = hwnd                  # Win32 window handle
-        self.window_title = window_title  # Full window title string
-        self.process_name = process_name  # Executable name (e.g. "OUTLOOK.EXE")
+        self.app_type = app_type
+        self.hwnd = hwnd
+        self.window_title = window_title
+        self.process_name = process_name
 
     def is_teams(self) -> bool:
         return self.app_type == APP_TEAMS
 
     def is_outlook(self) -> bool:
         return self.app_type == APP_OUTLOOK
+
+    def is_jabber(self) -> bool:
+        return self.app_type == APP_JABBER
 
     def is_known(self) -> bool:
         return self.app_type != APP_UNKNOWN
@@ -115,6 +124,13 @@ def _classify_app(window_title: str, process_name: str) -> str:
     for sig in OUTLOOK_SIGNATURES:
         if sig in title_lower:
             return APP_OUTLOOK
+
+    # Check Jabber
+    if "ciscojabber.exe" in proc_lower or "jabber.exe" in proc_lower:
+        return APP_JABBER
+    for sig in JABBER_SIGNATURES:
+        if sig in title_lower:
+            return APP_JABBER
 
     return APP_UNKNOWN
 

@@ -13,5 +13,5 @@ mss>=9.0.1                 # Fast screen capture
 pytesseract>=0.3.10        # Tesseract OCR wrapper (requires Tesseract binary)
 Pillow>=10.0.0             # Image processing for OCR
 
-# ---- Phase 3: AI Integration (install when ready) ----
-# openai>=1.30.0             # OpenAI + Azure OpenAI SDK
+# ---- Phase 3: AI Integration ----
+openai>=1.30.0                 # OpenAI + Azure OpenAI SDK
