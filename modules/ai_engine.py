@@ -137,10 +137,23 @@ def generate_suggestion(context_text: str, mode: str, settings) -> str:
                 {"role": "user", "content": context_text},
             ],
             temperature=0.7,
-            max_tokens=500,
+            max_tokens=1024,
         )
 
-        reply = response.choices[0].message.content.strip()
+        reply = response.choices[0].message.content or ""
+
+        # Some reasoning models (e.g. phi-4-mini-reasoning) put output
+        # in reasoning_content instead of content
+        if not reply.strip():
+            reasoning = getattr(response.choices[0].message, 'reasoning_content', '')
+            if reasoning:
+                # Extract the useful part — reasoning models often wrap
+                # the actual answer after their chain-of-thought
+                reply = reasoning.strip()
+
+        if not reply.strip():
+            return "The AI model returned an empty response. Try again or check your model."
+
         log.info(f"AI response received: {len(reply)} chars")
         return reply
 
