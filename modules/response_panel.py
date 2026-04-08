@@ -49,8 +49,9 @@ class ResponsePanel(QDialog):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
         # ---- Theme colours ---- #
-        self._accent = "#6264A7" if mode == "teams" else "#0078D4"
-        self._mode_label = "Teams Reply" if mode == "teams" else "Outlook Reply"
+        self._accent = "#6264A7" if mode == "teams" else "#00BCEB" if mode == "jabber" else "#0078D4"
+        labels = {"teams": "Teams Reply", "outlook": "Outlook Reply", "jabber": "Jabber Reply"}
+        self._mode_label = labels.get(mode, "Reply")
 
         self._build_ui()
         self.setFixedWidth(420)
@@ -246,13 +247,21 @@ class ResponsePanel(QDialog):
         self.status_lbl.setText("")
         self.copy_btn.setEnabled(True)
         self.regen_btn.setEnabled(True)
+        self._position_near_overlay()
+        self.show()
+        self.raise_()
+        self.activateWindow()
 
     def show_error(self, message: str):
         """Call this when an error occurs during context capture or AI call."""
-        self.suggestion_box.setPlainText("")
-        self.status_lbl.setText(f"⚠️  {message}")
+        self.suggestion_box.setPlainText(message)
+        self.status_lbl.setText("⚠️  See details above")
         self.copy_btn.setEnabled(False)
         self.regen_btn.setEnabled(True)
+        self._position_near_overlay()
+        self.show()
+        self.raise_()
+        self.activateWindow()
 
     def set_context(self, text: str):
         self.context_box.setPlainText(text)

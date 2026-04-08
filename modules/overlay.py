@@ -21,6 +21,7 @@ class OverlayWindow(QWidget):
 
     teams_clicked = pyqtSignal()
     outlook_clicked = pyqtSignal()
+    jabber_clicked = pyqtSignal()
 
     # ------------------------------------------------------------------ #
     #  Construction                                                         #
@@ -67,12 +68,21 @@ class OverlayWindow(QWidget):
         )
         self.btn_outlook.clicked.connect(self.outlook_clicked.emit)
 
+        # ---- Jabber button ---- #
+        self.btn_jabber = self._make_icon_button(
+            label="J",
+            color="#00BCEB",          # Cisco Jabber teal
+            tooltip="AI Reply — Jabber",
+        )
+        self.btn_jabber.clicked.connect(self.jabber_clicked.emit)
+
         layout.addWidget(self.btn_teams)
         layout.addWidget(self.btn_outlook)
+        layout.addWidget(self.btn_jabber)
         self.setLayout(layout)
 
-        # Fixed collapsed size
-        self.setFixedSize(90, 44)
+        # Fixed collapsed size (wider to fit 3 buttons)
+        self.setFixedSize(130, 44)
 
     @staticmethod
     def _make_icon_button(label: str, color: str, tooltip: str) -> QPushButton:
